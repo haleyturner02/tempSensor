@@ -5,21 +5,21 @@
 
 
 volatile int i, n, sampleCount, current, sample = 0;
-volatile float avg = 0;
+volatile float avg, unrounded_avg = 0;
 volatile float ADC[9];
-char packet[] = {0x00, 0x00, 0x00, 0x00};
+char packet[] = {0x12, 0x12, 0x12, 0x12};
 volatile unsigned char col_holding, row_holding, pressed_key;
 volatile unsigned char transmit_key;
 
 void initI2C_master() {
-    UCB1CTLW0 |= UCSWRST;       // SW RESET ON
+    UCB1CTLW0 |= UCSWRST;               // SW RESET ON
 
-    UCB1CTLW0 |= UCSSEL_3;      // SMCLK
-    UCB1BRW = 10;               // Prescalar = 10
+    UCB1CTLW0 |= UCSSEL_3;              // SMCLK
+    UCB1BRW = 10;                       // Prescalar = 10
 
-    UCB1CTLW0 |= UCMODE_3;      // Put into I2C mode
-    UCB1CTLW0 |= UCMST;         // Set as MASTER
-    UCB1CTLW0 |= UCTR;          // Put into Tx mode
+    UCB1CTLW0 |= UCMODE_3;              // Put into I2C mode
+    UCB1CTLW0 |= UCMST;                 // Set as MASTER
+    UCB1CTLW0 |= UCTR;                  // Put into Tx mode
 
     UCB1CTLW1 |= UCASTP_2;              // Enable automatic stop bit
     UCB1TBCNT = sizeof(packet);         // Transfer byte count
@@ -90,12 +90,14 @@ void rowInput(){
 }
 
 void transmit() {
-    UCB1CTLW0 |= UCTXSTT;               // Generate START condition
+    i = 0;
     UCB1IE |= UCTXIE0;                  // Local Tx interrupt enable
-    UCB1IFG |= UCSTPIFG;                // Set stop condition flag
-    UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
+    while(i < sizeof(packet)) {
+        UCB1CTLW0 |= UCTXSTT;               // Generate START condition
+        delay1000();
+        i++;
+    }
     UCB1IE &= ~UCTXIE0;                 // Clear transmit
-    delay1000();
 }
 
 int main(void) {
@@ -116,30 +118,9 @@ int main(void) {
 
 	    while(sample == 0) {}
 
-	    TB1CCTL0 &= ~CCIE;
 
-	    float unrounded_avg = 0;
+	    getAverage();
 
-	    if(sampleCount >= (n - 1) && n!=0) {                        // Transmit temperature average if enough samples have been recorded for desired window size
-
-	        for(i = current; i > current - n; i--) {                // Calculate moving average for window size n
-	            avg = avg + ADC[i];
-	        }
-	        unrounded_avg = avg / n;
-	        avg = round(unrounded_avg * 100) / 100;                   // Round Celsius temperature to tenths place
-	        transmitTemperature();                                  // Transmit rounded Celsius temperature
-	        avg = round(((unrounded_avg + 273.15) * 100) / 100);      // Round Kelvin temperature to tenths place
-	        transmitTemperature();                                  // Transmit reoundedKelvin temperature
-	    } else if(sampleCount > 2) {                                // Transmit temperature average with window of 3 if at least 3 samples have been recorded, but user has not set n/set n > 3
-	        unrounded_avg = (ADC[0] + ADC[1] + ADC[2]) / 3;         // Store unrounded average for accuracy in both Celsius and Kelvin temperatures
-	        avg = round(unrounded_avg * 100) / 100;                   // Round Celsius temperature to tenths place
-	        transmitTemperature();                                  // Transmit rounded Celsius temperature
-	        avg = round(((unrounded_avg + 273.15) * 100) / 100);      // Round Kelvin temperature to tenths place
-	        transmitTemperature();                                  // Transmit rounded Kelvin temperature
-	    }
-
-	    avg = 0;                                                    // Reset moving average
-	    sample = 0;                                                 // Reset sample indicator
 
 	    TB1CCTL0 |= CCIE;
 	}
@@ -185,23 +166,23 @@ void keyPressedAction() {
         case 0x17:          // *
             n = 0;
             packet[0] = pressed_key;            // Transmit *
-            packet[1] = 0x10;
-            packet[2] = 0x10;
-            packet[3] = 0x10;
-            packet[4] = 0x10;
+            packet[1] = 0x12;
+            packet[2] = 0x12;
+            packet[3] = 0x12;
+            packet[4] = 0x12;
             transmit();
             break;
         case 0x11:
             n = 0;
             packet[0] = pressed_key;            // Transmit #
-            packet[1] = 0x10;
-            packet[2] = 0x10;
-            packet[3] = 0x10;
-            packet[4] = 0x10;
+            packet[1] = 0x12;
+            packet[2] = 0x12;
+            packet[3] = 0x12;
+            packet[4] = 0x12;
             transmit();
             break;
         default:
-            n = -1;
+            //n = -1;
             break;
 
     }
@@ -261,40 +242,40 @@ void sampleSensor() {
 void getCharKey(int d) {
     switch(d) {                         // Set transmit key based on digit
         case 1:
-            transmit_key = 0x87;
+            transmit_key = 0x01;
             break;
         case 2:
-            transmit_key = 0x83;
+            transmit_key = 0x02;
             break;
         case 3:
-            transmit_key = 0x81;
+            transmit_key = 0x03;
             break;
         case 4:
-            transmit_key = 0x47;
+            transmit_key = 0x04;
             break;
         case 5:
-            transmit_key = 0x43;
+            transmit_key = 0x05;
             break;
         case 6:
-            transmit_key = 0x41;
+            transmit_key = 0x06;
             break;
         case 7:
-            transmit_key = 0x27;
+            transmit_key = 0x07;
             break;
         case 8:
-            transmit_key = 0x23;
+            transmit_key = 0x08;
             break;
         case 9:
-            transmit_key = 0x21;
-            break;
-        case 0:
-            transmit_key = 0x13;
-            break;
-        case -1:                        // '.'
             transmit_key = 0x09;
             break;
+        case 0:
+            transmit_key = 0x00;
+            break;
+        case -1:                        // '.'
+            transmit_key = 0x10;
+            break;
         case -2:
-            transmit_key = 0x10;        // Space holder for Kelvin temperature (no decimal)
+            transmit_key = 0x12;        // Space holder for Kelvin temperature (no decimal)
             break;
         default:
             transmit_key = 0;
@@ -307,8 +288,9 @@ void transmitTemperature() {
     int digit, j;
 
     avg = fabs(avg);
+    unrounded_avg = fabs(unrounded_avg);
 
-    if((avg / 100) > 1) {
+    if((unrounded_avg / 100) > 1) {
         for(i = 0; i < 4; i++) {
             if(i == 0) {
                 digit = avg / 100;
@@ -328,8 +310,8 @@ void transmitTemperature() {
             delay1000();
 
         }
-    } else if((avg / 10) > 1) {
-        avg = avg * 10;
+    } else if((unrounded_avg / 10) > 1) {
+        //avg = avg * 10;
         for(i = 0; i < 4; i++) {
             if(i == 0) {
                 digit = avg / 100;
@@ -355,6 +337,36 @@ void transmitTemperature() {
 
 }
 
+void getAverage() {
+
+    if(sampleCount > n - 1  && n!=0) {                          // Transmit temperature average if enough samples have been recorded for desired window size
+
+            for(i = 0; i < n; i++) {                                // Calculate moving average for window size n
+                avg = avg + ADC[i];
+            }
+            unrounded_avg = (avg / n) + 273.15;                     // Store unrounded average
+
+            avg = round(unrounded_avg);                             // Calculate Kelvin temperature and round to ones place
+            transmitTemperature();
+            unrounded_avg = unrounded_avg - 273.15;
+            avg = round((unrounded_avg) * 10);              // Calculature Celsius temperature and round to tenths place
+            transmitTemperature();
+
+        } else if(sampleCount > 2) {                                            // Transmit temperature average with window of 3 if at least 3 samples have been recorded, but user has not set n/set n > 3
+            unrounded_avg = ((ADC[0] + ADC[1] + ADC[2]) / 3) + 273.15;          // Store unrounded average
+
+            avg = round(unrounded_avg);                                         // Calculate Kelvin temperature and round to ones place
+            transmitTemperature();
+            unrounded_avg = unrounded_avg - 273.15;
+            avg = round((unrounded_avg) * 10);                         // Calculature Celsius temperature and round to tenths place
+            transmitTemperature();
+
+        }
+
+        avg = 0;                                                    // Reset moving average
+        sample = 0;                                                 // Reset sample indicator
+}
+
 #pragma vector = PORT3_VECTOR
 __interrupt void ISR_PORT3(void) {
 
@@ -374,7 +386,7 @@ __interrupt void ISR_TB0_CCR0(void) {
 
     pressed_key = col_holding + row_holding;    // Add column and row to get key pressed
 
-    keyPressedAction();                     // Use key pressed to set n or transmit */#
+    keyPressedAction();                     // Use key pressed to set n or transmit */# to LCD, A/B/C/D to LED
 }
 
 #pragma vector = TIMER1_B0_VECTOR
@@ -405,15 +417,12 @@ __interrupt void ISR_ADC(void) {
 #pragma vector = EUSCI_B1_VECTOR
 __interrupt void EUSCI_B1_TX_ISR(void) {
 
-    i = 0;
+    //UCB1TXBUF = packet[i];
 
     if(i == sizeof(packet) - 1)  {
         UCB1TXBUF = packet[i];
-        i = 0;
     } else {
         UCB1TXBUF = packet[i];
-        i++;
     }
-
 
 }
