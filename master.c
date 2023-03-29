@@ -7,7 +7,7 @@
 volatile int i, n, sampleCount, current, sample = 0;
 volatile float avg = 0;
 volatile float ADC[9];
-char packet[] = {0x03, 0x04};
+char packet[] = {0x00, 0x00, 0x00, 0x00};
 volatile unsigned char col_holding, row_holding, pressed_key;
 volatile unsigned char transmit_key;
 
@@ -21,8 +21,10 @@ void initI2C_master() {
     UCB1CTLW0 |= UCMST;         // Set as MASTER
     UCB1CTLW0 |= UCTR;          // Put into Tx mode
 
-    UCB1CTLW1 |= UCASTP_2;      // Enable automatic stop bit
-    UCB1TBCNT = 1;              // Transfer byte count
+    UCB1CTLW1 |= UCASTP_2;              // Enable automatic stop bit
+    UCB1TBCNT = sizeof(packet);         // Transfer byte count
+
+    UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
 
     P6DIR |= (BIT6 | BIT5 | BIT4);      // Set P6.6-P6.4 as outputs
     P6OUT &= ~(BIT6 | BIT5 | BIT4);     // Clear P6.6-P6.4
@@ -87,6 +89,15 @@ void rowInput(){
     P3OUT |= (BIT0 | BIT1 | BIT2 | BIT3);  // Set as outputs
 }
 
+void transmit() {
+    UCB1CTLW0 |= UCTXSTT;               // Generate START condition
+    UCB1IE |= UCTXIE0;                  // Local Tx interrupt enable
+    UCB1IFG |= UCSTPIFG;                // Set stop condition flag
+    UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
+    UCB1IE &= ~UCTXIE0;                 // Clear transmit
+    delay1000();
+}
+
 int main(void) {
 	WDTCTL = WDTPW | WDTHOLD;	// Stop watchdog timer
 
@@ -115,15 +126,15 @@ int main(void) {
 	            avg = avg + ADC[i];
 	        }
 	        unrounded_avg = avg / n;
-	        avg = round(unrounded_avg * 10) / 10;                   // Round Celsius temperature to tenths place
+	        avg = round(unrounded_avg * 100) / 100;                   // Round Celsius temperature to tenths place
 	        transmitTemperature();                                  // Transmit rounded Celsius temperature
-	        avg = round(((unrounded_avg + 273.15) * 10) / 10);      // Round Kelvin temperature to tenths place
+	        avg = round(((unrounded_avg + 273.15) * 100) / 100);      // Round Kelvin temperature to tenths place
 	        transmitTemperature();                                  // Transmit reoundedKelvin temperature
 	    } else if(sampleCount > 2) {                                // Transmit temperature average with window of 3 if at least 3 samples have been recorded, but user has not set n/set n > 3
 	        unrounded_avg = (ADC[0] + ADC[1] + ADC[2]) / 3;         // Store unrounded average for accuracy in both Celsius and Kelvin temperatures
-	        avg = round(unrounded_avg * 10) / 10;                   // Round Celsius temperature to tenths place
+	        avg = round(unrounded_avg * 100) / 100;                   // Round Celsius temperature to tenths place
 	        transmitTemperature();                                  // Transmit rounded Celsius temperature
-	        avg = round(((unrounded_avg + 273.15) * 10) / 10);      // Round Kelvin temperature to tenths place
+	        avg = round(((unrounded_avg + 273.15) * 100) / 100);      // Round Kelvin temperature to tenths place
 	        transmitTemperature();                                  // Transmit rounded Kelvin temperature
 	    }
 
@@ -174,23 +185,20 @@ void keyPressedAction() {
         case 0x17:          // *
             n = 0;
             packet[0] = pressed_key;            // Transmit *
-            UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
-            UCB1CTLW0 |= UCTXSTT;               // Generate START condition
-            UCB1TXBUF = packet[0];              // Place packet in Tx buffer
-            UCB1IFG |= UCSTPIFG;                // Set stop condition flag
-            UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
-            UCB1IE &= ~UCTXIE0;                 // Clear transmit
-            delay1000();
+            packet[1] = 0x10;
+            packet[2] = 0x10;
+            packet[3] = 0x10;
+            packet[4] = 0x10;
+            transmit();
             break;
         case 0x11:
             n = 0;
             packet[0] = pressed_key;            // Transmit #
-            UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
-            UCB1CTLW0 |= UCTXSTT;               // Generate START condition
-            UCB1TXBUF = packet[0];              // Place packet in Tx buffer
-            UCB1IFG |= UCSTPIFG;                // Set stop condition flag
-            UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
-            UCB1IE &= ~UCTXIE0;                 // Clear transmit
+            packet[1] = 0x10;
+            packet[2] = 0x10;
+            packet[3] = 0x10;
+            packet[4] = 0x10;
+            transmit();
             break;
         default:
             n = -1;
@@ -282,6 +290,12 @@ void getCharKey(int d) {
         case 0:
             transmit_key = 0x13;
             break;
+        case -1:                        // '.'
+            transmit_key = 0x09;
+            break;
+        case -2:
+            transmit_key = 0x10;        // Space holder for Kelvin temperature (no decimal)
+            break;
         default:
             transmit_key = 0;
             break;
@@ -290,45 +304,55 @@ void getCharKey(int d) {
 
 void transmitTemperature() {
 
-    int digit;
+    int digit, j;
+
+    avg = fabs(avg);
 
     if((avg / 100) > 1) {
-        i = 4;                              // Temperature has 4 digits (XXX.X)
-    } else if((avg / 10) > 1) {
-        i = 3;                              // Temperature has 3 digits (XXX.X)
-    } else {
-        i = 2;                              // Temperature has 2 digits (X.X)
-    }
+        for(i = 0; i < 4; i++) {
+            if(i == 0) {
+                digit = avg / 100;
+                avg = avg - digit*100;
+            } else if(i == 1) {
+                digit = avg / 10;
+                avg = avg - digit*10;
+            } else if(i == 2) {
+                digit = avg;
+                avg = 0;
+            } else if(i == 3) {
+                digit = -2;
+            }
 
-    for(i; i > 0; i--) {                    // Get each individual digit in temperature, starting with greatest place value
-        if(i == 4) {
-            digit = round(avg / 100);
-            avg = avg - digit * 100;
-        } else if (i == 3) {
-            digit = round(avg / 10);
-            avg = avg - digit * 10;
-        } else if (i == 2) {
-            digit = round(avg);
-            avg = avg - digit;
-        } else {
-            digit = round(avg * 10);
-            avg = 0;
+            getCharKey(digit);
+            packet[i] = transmit_key;
+            delay1000();
+
         }
+    } else if((avg / 10) > 1) {
+        avg = avg * 10;
+        for(i = 0; i < 4; i++) {
+            if(i == 0) {
+                digit = avg / 100;
+                avg = avg - digit*100;
+            } else if(i == 1) {
+                digit = avg / 10;
+                avg = avg - digit*10;
+            } else if(i == 2) {
+                digit = -1;
+            } else if(i == 3) {
+                digit = avg;
+                avg = 0;
+            }
 
-        getCharKey(digit);                  // Get ASCII key for digit to transmit to LCD slave
-        packet[0] = transmit_key;           // Place key in packet
+            getCharKey(digit);
+            packet[i] = transmit_key;
+            delay1000();
 
-
-        UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
-        UCB1CTLW0 |= UCTXSTT;               // Generate START condition
-        UCB1TXBUF = packet[0];              // Place packet in Tx buffer
-        UCB1IFG |= UCSTPIFG;                // Set stop condition flag
-        UCB1IFG &= ~UCSTPIFG;               // Clear STOP flag
-
-        UCB1IE &= ~UCTXIE0;                 // Clear transmit
-        delay1000();
-
+        }
     }
+
+    transmit();                             // Transmit temperature packet to LCD slave
+
 }
 
 #pragma vector = PORT3_VECTOR
@@ -380,5 +404,16 @@ __interrupt void ISR_ADC(void) {
 
 #pragma vector = EUSCI_B1_VECTOR
 __interrupt void EUSCI_B1_TX_ISR(void) {
-    UCB1TXBUF = packet[0];
+
+    i = 0;
+
+    if(i == sizeof(packet) - 1)  {
+        UCB1TXBUF = packet[i];
+        i = 0;
+    } else {
+        UCB1TXBUF = packet[i];
+        i++;
+    }
+
+
 }
