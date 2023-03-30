@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-// Pins 4 & 5 jumper
+// Pins 4 & 5 jumper SPI wire for 2355
 
 int j = 0;
 
@@ -16,8 +16,7 @@ volatile float ADC[9];
 
 volatile unsigned char transmit_key;
 
-//char packet[]= {0x01, 0x02, 0x03, 0x04};
-char packet[] = {0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A};
+char packet[] = {0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A};         // 7 byte packet for transmission
 volatile unsigned char col_holding, row_holding;
 volatile unsigned char pressed_key;
 int lock_state = 0;
@@ -31,11 +30,10 @@ void initI2C_master(){
      UCB1CTLW0 |= UCMODE_3;      // Put into I2C mode
      UCB1CTLW0 |= UCMST;         // set as MASTER
      UCB1CTLW0 |= UCTR;          // Put into Tx mode
-     //UCB1I2CSA = 0x0068;          // Slave address = 0x68
 
-     UCB1CTLW1 |= UCASTP_2;      // enable automatic stop bit
+     UCB1CTLW1 |= UCASTP_2;         // Enable automatic stop bit
      //UCB1TBCNT = sizeof(packet);  // Transfer byte count
-     UCB1TBCNT = 1;  // Transfer byte count
+     UCB1TBCNT = 1;                 // Transfer byte count
 
      // setup ports
      P6DIR |= (BIT6 | BIT5 | BIT4);  // set P6.6-4 as OUTPUT
@@ -51,18 +49,14 @@ void initI2C_master(){
      PM5CTL0 &= ~LOCKLPM5;       // turn on I/O
      UCB1CTLW0 &= ~UCSWRST;      // SW RESET OFF
 
-     //UCB1IE |= UCTXIE0;          // enable I2C B0 Tx IRQ
 }
 
 void initTimerB0compare(){
-    // setup TB0
+    // Setup TB0
     TB0CTL |= TBCLR;        // Clear TB0
     TB0CTL |= TBSSEL__ACLK; // select SMCLK
     TB0CTL |= MC__UP;       // UP mode
-    //TB0CCR0 = 5384;         // set CCR0 value (period)
 
-    //TB0CCTL0 |= CCIE;       // local IRQ enable for CCR0
-    //TB0CCTL0 &= ~CCIFG;     // clear CCR0 flag
 }
 
 void initTimerB1compare() {
@@ -108,10 +102,6 @@ void rowInput(){
     P3DIR |= (BIT0 | BIT1 | BIT2 | BIT3);  // init pins as outputs
     P3OUT |= (BIT0 | BIT1 | BIT2 | BIT3);  // set as outputs
 
-    //P3IES &= ~(BIT4 | BIT5 | BIT6 | BIT7); // L-H edge sensitivity
-    //P3IE |= (BIT4 | BIT5 | BIT6 | BIT7); // enable IRQs
-
-    //P3IFG &= ~(BIT4 | BIT5 | BIT6 | BIT7); // Clear the P3 interrupt flags
 }
 
 
@@ -131,7 +121,7 @@ void ADC_stop() {
 
 void sampleSensor() {
 
-    if(sampleCount >= 8) {
+    if(sampleCount >= 8) {                  // Shift stack of samples right one in array
         ADC[8] = ADC[7];
     }
     if(sampleCount >= 7) {
@@ -156,19 +146,21 @@ void sampleSensor() {
         ADC[1] = ADC[0];
     }
 
-    delay1000();                    // Wait for ADC ref
-    ADC_start();                    // Start sample from ADC
-    ADC_stop();                     // Stop sample from ADC
+    delay1000();                            // Wait for ADC ref
+    UCB1IE &= ~UCTXIE0;
+    P3IE &= ~(BIT0 | BIT1 | BIT2 | BIT3);   //  Disable P3 interrupts while using ADC
+    ADC_start();                            // Start sample from ADC
+    ADC_stop();                             // Stop sample from ADC
+    UCB1IE |= UCTXIE0;
+    P3IE |= (BIT0 | BIT1 | BIT2 | BIT3);    // Enable P3 interrupts
 
-    // Convert DN (ADCMEM0) to voltage to temperature (Celsius)
-
-    ADC[0] = -1481.96 + sqrt( 2.1962*pow(10, 6) + (1.8639 - (ADCMEM0/(pow(2, 10))*3.3)) / (3.88*pow(10, -6))  );
+    ADC[0] = -1481.96 + sqrt( 2.1962*pow(10, 6) + (1.8639 - (ADCMEM0/(pow(2, 10))*3.3)) / (3.88*pow(10, -6))  );    // Convert DN (ADCMEM0) to voltage to temperature (Celsius)
 
 }
 
 
 int getCharKey(int d) {
-    switch(d) {                         // Set transmit key based on digit
+    switch(d) {                         // Set transmit key based on digit value
         case 1:
             return 0x01;
             break;
@@ -199,11 +191,11 @@ int getCharKey(int d) {
         case 0:
             return 0x00;
             break;
-        case -1:                        // '.'
+        case -1:                        // Use key 0x10 for '.'
             return 0x10;
             break;
         case -2:
-            return 0x12;        // Space holder for Kelvin temperature (no decimal)
+            return 0x0A;                // Space holder for Kelvin temperature (no decimal)
             break;
         default:
             return 0;
@@ -215,13 +207,11 @@ void transmitTemperature() {
 
     int digit, j;
 
-    avg = round(unrounded_avg+273.15);
+    avg = round(unrounded_avg+273.15);      // Calculate rounded Kelvin temperature (i.e. 296°K)
 
     avg = abs(avg);
 
-    // Kelvin average i.e. 296
-
-   for(i = 0; i < 3; i++) {
+   for(i = 0; i < 3; i++) {                 // Add Kelvin temperature to packet in order
        if(i == 0) {
            digit = avg / 100;
            avg = avg - digit*100;
@@ -235,12 +225,10 @@ void transmitTemperature() {
            packet[i] = getCharKey(digit);
    }
 
-    avg = round(unrounded_avg*10);
+    avg = round(unrounded_avg*10);          // Calculate rounded Celsius temperature (i.e. 22.6°C)
     avg = fabs(avg);
 
-    //  Celsius average i.e. 26.2
-
-    for(i = 3; i < 7; i++) {
+    for(i = 3; i < 7; i++) {                // Add Celsius temperature to packet in order
         if(i == 3) {
             digit = avg / 100;
             avg = avg - digit*100;
@@ -256,104 +244,60 @@ void transmitTemperature() {
         packet[i] = getCharKey(digit);
     }
 
-    //transmit();                             // Transmit temperature packet to LCD slave
-
 }
 
 void getAverage() {
 
-    if(sampleCount > n - 1  && n!=0) {                          // Transmit temperature average if enough samples have been recorded for desired window size
+    if(sampleCount > n - 1  && n > 0) {                          // Transmit temperature average if enough samples have been recorded for desired window size
 
-            for(i = 0; i < n; i++) {                                // Calculate moving average for window size n
+            for(i = 0; i < n; i++) {                            // Calculate moving average for window size n
                 avg = avg + ADC[i];
             }
 
-            unrounded_avg = avg / 3;
+            unrounded_avg = avg / n;
             transmitTemperature();
 
-            /*unrounded_avg = (avg / n) + 273.15;                     // Store unrounded average
+    }
 
-            avg = round(unrounded_avg);                             // Calculate Kelvin temperature and round to ones place
-            transmitTemperature();
-            unrounded_avg = unrounded_avg - 273.15;
-            avg = round((unrounded_avg) * 10);              // Calculature Celsius temperature and round to tenths place
-            transmitTemperature();*/
+    // May not need default of n = 3 sample window
+    /*} else if(sampleCount > 2 && n == 0) {                                // Transmit temperature average with window of 3 if at least 3 samples have been recorded, but user has not set n/set n > 3
 
-        } else if(sampleCount > 2) {
-
-                                                                // Transmit temperature average with window of 3 if at least 3 samples have been recorded, but user has not set n/set n > 3
             unrounded_avg = ((ADC[0] + ADC[1] + ADC[2]) / 3);
             transmitTemperature();
 
-            /*unrounded_avg = ((ADC[0] + ADC[1] + ADC[2]) / 3) + 273.15;          // Store unrounded average
+    }*/
 
-            avg = round(unrounded_avg);                                         // Calculate Kelvin temperature and round to ones place
-            transmitTemperature();
-            unrounded_avg = unrounded_avg - 273.15;
-            avg = round((unrounded_avg) * 10);                         // Calculature Celsius temperature and round to tenths place
-            transmitTemperature();*/
-
-        }
-
-        avg = 0;                                                    // Reset moving average
-        sample = 0;                                                 // Reset sample indicator
+   avg = 0;                                                    // Reset moving average
+   sample = 0;                                                 // Reset sample indicator
 }
 
-transmit(){
-    UCB1I2CSA = 0x0068;     // Slave address = 0x58
-    UCB1CTLW0 |= UCTXSTT;   // generate START condition
-    while((UCB1IFG & UCSTPIFG)==0);
-    UCB1IFG &= ~UCSTPIFG;
-
-    UCB1IE &= ~UCTXIE0;
-    for(i=0;i<=2000;i++){}
-}
 
 int main(void)
 {
-    WDTCTL = WDTPW | WDTHOLD;   // stop watchdog timer
+    WDTCTL = WDTPW | WDTHOLD;       //Stop watchdog timer
 
     initI2C_master();
     initTimerB0compare();
 
-    initTimerB1compare();       // Initialize Timer B1 for sampling temperature sensor every 333ms
-    configureAdc();             // Initialize ADC for receiving input signal from temperature sensor
+    initTimerB1compare();           // Initialize Timer B1 for sampling temperature sensor every 333ms
+    configureAdc();                 // Initialize ADC for receiving input signal from temperature sensor
 
     columnInput();
 
-    PM5CTL0 &= ~LOCKLPM5;   // turn on Digital I/O
+    PM5CTL0 &= ~LOCKLPM5;           // Turn on Digital I/O
 
-    UCB1I2CSA = 0x0068;
-    UCB1IE |= UCTXIE0; // enable
+    UCB1I2CSA = 0x0068;             // Set LCD slave address
+    UCB1IE |= UCTXIE0;              // Enable I2C B0 TX interrupt
 
     __enable_interrupt();
 
     int i,k;
     while(1){
 
-
-        //transmitTemperature();
-        //getAverage();
         UCB1CTLW0 |= UCTXSTT;   // generate START condition
-        for(k=0; k<=3;k++){
+        for(k=0; k<=5;k++){
             for(i=0;i<=5000;i++){}
         }
-
-//        for(k=0; k<=1;k++){
-//            for(i=0;i<=5000;i++){}
-//        }
-//        UCB1IE |= UCTXIE0; // enable
-//
-//        UCB1I2CSA = 0x0068;     // Slave address = 0x58
-//        UCB1CTLW0 |= UCTXSTT;   // generate START condition
-//        while((UCB1IFG & UCSTPIFG)==0);
-//        UCB1IFG &= ~UCSTPIFG;
-//
-//        UCB1IE &= ~UCTXIE0;
-//        for(i=0;i<=2000;i++){}
-
-
-
     }
 
     return 0;
@@ -404,27 +348,72 @@ int is_unlocked(char key){
 
 void keyPressedAction(char pressed_key) {
     if(is_unlocked(pressed_key) == 1){
-        packet[0] = pressed_key;
-        UCB1IE |= UCTXIE0;
+        if(pressed_key == 0x11 || pressed_key == 0x17) {        // If #/*, transmit to LCD slave
+            packet[0] = pressed_key;                            // Place #/* first in packet
+            for(i = 1; i < 7; i++) {
+                packet[i] = 0x0A;                               // Fill the rest of packet with don't care values
+            }
+            UCB1IE |= UCTXIE0;                                  // Enable I2C B0 TX interrupt
+        } else {
+            switch(pressed_key) {           // If not */#, set n value to key pressed (0-9)
+                case 0x87:
+                    n = 1;
+                    break;
+                case 0x83:
+                    n = 2;
+                    break;
+                case 0x81:
+                    n = 3;
+                    break;
+                case 0x47:
+                    n = 4;
+                    break;
+                case 0x43:
+                    n = 5;
+                    break;
+                case 0x41:
+                    n = 6;
+                    break;
+                case 0x27:
+                    n = 7;
+                    break;
+                case 0x23:
+                    n = 8;
+                    break;
+                case 0x21:
+                    n = 9;
+                    break;
+                case 0x13:
+                    n = 0;
+                    for(i = 0; i < 7; i++) {
+                        packet[i] = 0x0A;
+                    }
+                    break;
+                default:
+                    n = 0;
+                    break;
+            }
+        }
     }
 
-    columnInput();
-    P3IFG &= ~(BIT0 | BIT1 | BIT2 | BIT3); // Clear the P3 interrupt flags
+    columnInput();                              // Reset keypad columns to be inputs
+    P3IFG &= ~(BIT0 | BIT1 | BIT2 | BIT3);      // Clear the P3 interrupt flags
 
 }
 
 #pragma vector=PORT3_VECTOR
 __interrupt void ISR_PORT3(void){
-    /* enable timer for debouncing */
-    TB0CCTL0 |= CCIE;       // local IRQ enable for CCR0
-    TB0CCR0 = 500;         // set CCR0 value (period) // old value = 2384
-    TB0CCTL0 &= ~CCIFG;     // clear CCR0 flag to begin count
+    /* Enable timer for debouncing */
+    TB0CCTL0 |= CCIE;                       // Local IRQ enable for CCR0
+    TB0CCR0 = 500;                          // Set CCR0 value (period) // old value = 2384
+    TB0CCTL0 &= ~CCIFG;                     // Clear CCR0 flag to begin count
 }
 
 #pragma vector=TIMER0_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void){
 
-    TB0CCTL0 &= ~CCIE;  // Disable TimerB0
+    TB0CCTL0 &= ~CCIE;      // Disable TimerB0
+    UCB1IE &= ~UCTXIE0;     // Disable I2C B0 TX interrupt
 
     col_holding = P3IN;
 
@@ -434,6 +423,8 @@ __interrupt void ISR_TB0_CCR0(void){
     pressed_key = col_holding + row_holding;
 
     keyPressedAction(pressed_key);
+
+    UCB1IE |= UCTXIE0;      // Enable I2C B0 TX interrupt
 
 }
 
@@ -469,10 +460,6 @@ __interrupt void ISR_ADC(void) {
     }
 }
 
-//#pragma vector=EUSCI_B1_VECTOR
-//__interrupt void EUSCI_B1_TX_ISR(void){
-//    UCB1TXBUF = packet[0];
-//}
 
 #pragma vector=EUSCI_B1_VECTOR
 __interrupt void EUSCI_B1_TX_ISR(void){
@@ -484,3 +471,4 @@ __interrupt void EUSCI_B1_TX_ISR(void){
         j++;
     }
 }
+  
