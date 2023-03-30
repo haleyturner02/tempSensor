@@ -4,7 +4,7 @@
 #include <math.h>
 
 
-volatile int i, n, sampleCount, current, sample = 0;
+volatile int i, j, n, sampleCount, sample = 0;
 volatile float avg, unrounded_avg = 0;
 volatile float ADC[9];
 char packet[] = {0x12, 0x12, 0x12, 0x12};
@@ -24,7 +24,7 @@ void initI2C_master() {
     UCB1CTLW1 |= UCASTP_2;              // Enable automatic stop bit
     UCB1TBCNT = sizeof(packet);         // Transfer byte count
 
-    UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
+    //UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
 
     P6DIR |= (BIT6 | BIT5 | BIT4);      // Set P6.6-P6.4 as outputs
     P6OUT &= ~(BIT6 | BIT5 | BIT4);     // Clear P6.6-P6.4
@@ -89,14 +89,11 @@ void rowInput(){
     P3OUT |= (BIT0 | BIT1 | BIT2 | BIT3);  // Set as outputs
 }
 
-void transmit() {
-    i = 0;
+void transmit() {                       // Need to transmit to LED bar as well
     UCB1IE |= UCTXIE0;                  // Local Tx interrupt enable
-    while(i < sizeof(packet)) {
-        UCB1CTLW0 |= UCTXSTT;               // Generate START condition
-        delay1000();
-        i++;
-    }
+    UCB1I2CSA = 0x0068;                 // LCD Slave address = 0x68;
+    UCB1CTLW0 |= UCTXSTT;               // Generate START condition
+    for(i = 0; i <= 5000; i++){}
     UCB1IE &= ~UCTXIE0;                 // Clear transmit
 }
 
@@ -133,6 +130,10 @@ void delay1000() {
     for(i = 0; i <= 1000; i++){}
 }
 
+void resetPacket() {
+    packet[] = {0x12, 0x12, 0x12, 0x12};
+}
+
 void keyPressedAction() {
                                         // Use keypad input to set n for number values, or transmit */# to LCD slave
     switch(pressed_key) {
@@ -165,24 +166,37 @@ void keyPressedAction() {
             break;
         case 0x17:          // *
             n = 0;
+            resetPacket();
             packet[0] = pressed_key;            // Transmit *
-            packet[1] = 0x12;
-            packet[2] = 0x12;
-            packet[3] = 0x12;
-            packet[4] = 0x12;
             transmit();
             break;
         case 0x11:
             n = 0;
+            resetPacket();
             packet[0] = pressed_key;            // Transmit #
-            packet[1] = 0x12;
-            packet[2] = 0x12;
-            packet[3] = 0x12;
-            packet[4] = 0x12;
+            transmit();
+            break;
+        case 0x80:
+            resetPacket();
+            packet[0] = pressed_key;            // Transmit A
+            transmit();
+            break;
+        case 0x40:
+            resetPacket();
+            packet[0] = pressed_key;            // Transmit B
+            transmit();
+            break;
+        case 0x20:
+            resetPacket();
+            packet[0] = pressed_key;            // Transmit C
+            transmit();
+            break;
+        case 0x10:
+            resetPacket();
+            packet[0] = pressed_key;
             transmit();
             break;
         default:
-            //n = -1;
             break;
 
     }
@@ -234,8 +248,6 @@ void sampleSensor() {
     // Convert DN (ADCMEM0) to voltage to temperature (Celsius)
 
     ADC[0] = -1481.96 + sqrt( 2.1962*pow(10, 6) + (1.8639 - (ADCMEM0/(pow(2, 10))*3.3)) / (3.88*pow(10, -6))  );
-
-    current = i;                    // Keep track of current sample
 
 }
 
@@ -419,10 +431,12 @@ __interrupt void EUSCI_B1_TX_ISR(void) {
 
     //UCB1TXBUF = packet[i];
 
-    if(i == sizeof(packet) - 1)  {
-        UCB1TXBUF = packet[i];
+    if(j == sizeof(packet) - 1)  {
+        UCB1TXBUF = packet[j];
+        j = 0;
     } else {
-        UCB1TXBUF = packet[i];
+        UCB1TXBUF = packet[j];
+        j++;
     }
 
 }
