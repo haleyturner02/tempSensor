@@ -221,7 +221,7 @@ void transmitTemperature() {
 
     // Kelvin average i.e. 296
 
-   for(i = 0; i < 4; i++) {
+   for(i = 0; i < 3; i++) {
        if(i == 0) {
            digit = avg / 100;
            avg = avg - digit*100;
